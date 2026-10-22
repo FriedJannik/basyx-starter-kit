@@ -1,6 +1,7 @@
 import type { ClientArchitecture } from '@/utils/clientArchitecture';
 import type { ComposeService } from '@/utils/optionalServices';
 import * as yaml from 'js-yaml';
+import { findComposePortConflicts } from '@/utils/composePorts';
 
 export type ThirdPartyFieldType = 'text' | 'number' | 'password' | 'switch' | 'select';
 export type ThirdPartyValue = string | number | boolean | undefined;
@@ -15,6 +16,8 @@ export interface ThirdPartyServiceField {
   label: string;
   type: ThirdPartyFieldType;
   environment?: string;
+  /** Compose container id; inferred only for single-container entries. */
+  service?: string;
   description?: string;
   required?: boolean;
   minLength?: number;
@@ -114,6 +117,10 @@ function parseField(value: unknown, serviceId: string): ThirdPartyServiceField {
     label: asString(value.label, `Configuration field label for ${serviceId}`),
     type,
     environment: typeof value.environment === 'string' ? value.environment : undefined,
+    service:
+      value.service === undefined
+        ? undefined
+        : asString(value.service, `Environment target for ${serviceId}`),
     description: typeof value.description === 'string' ? value.description : undefined,
     required: value.required === true,
     generate: value.generate as ThirdPartyServiceField['generate'],
@@ -160,6 +167,19 @@ export function parseThirdPartyServiceCatalog(source: string): ThirdPartyService
         return [composeId, cloneCompose(service) as ComposeService];
       })
     );
+    const configuration = Array.isArray(value.configuration)
+      ? value.configuration.map(field => parseField(field, id))
+      : [];
+    configuration.forEach(field => {
+      if (!field.environment) return;
+      const target =
+        field.service || (Object.keys(compose).length === 1 ? Object.keys(compose)[0] : undefined);
+      if (!target || !Object.hasOwn(compose, target))
+        throw new Error(
+          `Environment field '${field.key}' for ${id} requires a valid target service.`
+        );
+      field.service = target;
+    });
     return {
       id,
       name: asString(value.name, `Service name for ${id}`),
@@ -174,11 +194,15 @@ export function parseThirdPartyServiceCatalog(source: string): ThirdPartyService
             return id;
           })
         : undefined,
-      configuration: Array.isArray(value.configuration)
-        ? value.configuration.map(field => parseField(field, id))
-        : [],
+      configuration,
     };
   });
+}
+
+export async function loadThirdPartyServiceCatalog(): Promise<ThirdPartyService[]> {
+  const response = await fetch('/third-party-services.yaml');
+  if (!response.ok) throw new Error(`Catalogue request failed: ${response.status}`);
+  return parseThirdPartyServiceCatalog(await response.text());
 }
 
 export function thirdPartyManagedServiceIds(services: ThirdPartyService[]): string[] {
@@ -232,19 +256,23 @@ export function buildThirdPartyServiceCompose(
     return value;
   };
   const compose = render(service.compose) as Record<string, ComposeService>;
-  const environment = Object.fromEntries(
-    service.configuration
-      .filter(field => field.environment)
-      .map(field => [field.environment as string, values[field.key] ?? field.default])
-      .filter(([, value]) => value !== undefined && value !== '')
-      .map(([key, value]) => [key, String(value)])
-  );
-  if (!Object.keys(environment).length) return compose;
-  Object.values(compose).forEach(composeService => {
-    const existing = Array.isArray(composeService.environment)
-      ? Object.fromEntries(composeService.environment.map(entry => entry.split(/=(.*)/s, 2)))
-      : composeService.environment || {};
-    composeService.environment = { ...existing, ...environment };
+  Object.entries(compose).forEach(([id, composeService]) => {
+    const environment = Object.fromEntries(
+      service.configuration
+        .filter(field => field.environment && (field.service || Object.keys(compose)[0]) === id)
+        .map(field => [field.environment as string, values[field.key] ?? field.default])
+        .filter(([, value]) => value !== undefined && value !== '')
+        .map(([key, value]) => [key, String(value).replaceAll('$', () => '$$')])
+    );
+    if (!Object.keys(environment).length) return;
+    if (Array.isArray(composeService.environment)) {
+      composeService.environment = [
+        ...composeService.environment.filter(
+          entry => !Object.hasOwn(environment, entry.split('=')[0]!)
+        ),
+        ...Object.entries(environment).map(([key, value]) => `${key}=${value}`),
+      ];
+    } else composeService.environment = { ...composeService.environment, ...environment };
   });
   return compose;
 }
@@ -313,6 +341,48 @@ export function thirdPartyValuesForArchitecture(
   return result;
 }
 
+/** Validate persisted inputs as well as the actual Compose output before export. */
+export function validateThirdPartyServices(
+  services: ThirdPartyService[],
+  selections: Array<{ id: string; values: Record<string, ThirdPartyValue> }>,
+  compose: Record<string, ComposeService>
+): string[] {
+  const errors = findComposePortConflicts(compose);
+  const managed = new Set(thirdPartyManagedServiceIds(services));
+  const selectedIds = new Set(
+    selections.flatMap(selection =>
+      Object.keys(services.find(service => service.id === selection.id)?.compose || {})
+    )
+  );
+  const base = Object.fromEntries(
+    Object.entries(compose).filter(([id]) => !managed.has(id) || selectedIds.has(id))
+  );
+  const resolution = resolveThirdPartyServiceReferences(
+    services,
+    Object.fromEntries(selections.map(selection => [selection.id, selection.values])),
+    base
+  );
+  errors.push(...resolution.errors);
+  selections.forEach(selection => {
+    const service = services.find(service => service.id === selection.id);
+    if (!service) {
+      errors.push(`Unknown additional service '${selection.id}'.`);
+      return;
+    }
+    service.configuration.forEach(field => {
+      const error = thirdPartyFieldError(field, resolution.values[service.id]?.[field.key]);
+      if (error) errors.push(`${service.name}: ${field.label} — ${error}`);
+    });
+    Object.keys(service.compose).forEach(id => {
+      if (!compose[id])
+        errors.push(
+          `${service.name}: container '${id}' is missing. Reconfigure Additional Services.`
+        );
+    });
+  });
+  return [...new Set(errors)];
+}
+
 const PLACEHOLDER_PATTERN = /{{\s*([^{}]+?)\s*}}/g;
 
 function readPort(service: ComposeService | undefined, indexFromEnd: number): string | undefined {
@@ -357,7 +427,9 @@ export function resolveThirdPartyServiceReferences(
   selectedServices.forEach(service => {
     const composeIds = Object.keys(service.compose);
     if (composeIds[0]) aliases.set(service.id, composeIds[0]);
-    Object.assign(composeById, cloneCompose(service.compose));
+    Object.entries(service.compose).forEach(([id, template]) => {
+      composeById[id] = { ...cloneCompose(template), ...cloneCompose(baseCompose[id] || {}) };
+    });
   });
 
   const resolvedValues: Record<string, Record<string, ThirdPartyValue>> = {};

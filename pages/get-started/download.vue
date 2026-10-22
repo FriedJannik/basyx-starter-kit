@@ -90,6 +90,10 @@ import { generateRsaPrivateKeyPem } from '@/utils/rsaKey';
 import { addOptionalSetupAssets } from '@/utils/setupAssets';
 import { createSetupReadme } from '@/utils/setupReadme';
 import { buildShareConfigUrl } from '@/utils/shareConfig';
+import {
+  loadThirdPartyServiceCatalog,
+  validateThirdPartyServices,
+} from '@/utils/thirdPartyServices';
 
 defineOptions({
   name: 'Download',
@@ -187,6 +191,15 @@ async function downloadAsZip(): Promise<void> {
   }
 
   try {
+    const additionalErrors = validateThirdPartyServices(
+      appStore.getThirdPartyServices.length ? await loadThirdPartyServiceCatalog() : [],
+      appStore.getThirdPartyServices,
+      getComposeServices() || {}
+    );
+    if (additionalErrors.length) {
+      downloadError.value = `Review Additional Services and Container Config before downloading: ${additionalErrors.join(' ')}`;
+      return;
+    }
     const privateKeyPem = await generateRsaPrivateKeyPem();
     const zip = new JSZip();
 

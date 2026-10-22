@@ -1,8 +1,14 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import JSZip from 'jszip';
+import { readFileSync } from 'node:fs';
 import { vi } from 'vitest';
 import DownloadPage from '@/pages/get-started/download.vue';
 import { useAppStore } from '@/stores/app';
+import {
+  buildThirdPartyServiceCompose,
+  initializeThirdPartyValues,
+  parseThirdPartyServiceCatalog,
+} from '@/utils/thirdPartyServices';
 
 vi.mock('@/utils/rsaKey', () => ({ generateRsaPrivateKeyPem: vi.fn(async () => 'test-key') }));
 vi.stubGlobal('useSeoMeta', vi.fn());
@@ -38,6 +44,9 @@ async function download(): Promise<ReturnType<typeof mount>> {
 
 describe('download with optional Telegraf', () => {
   beforeEach(() => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () => new Response(readFileSync('public/third-party-services.yaml', 'utf8'))
+    );
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
@@ -46,6 +55,32 @@ describe('download with optional Telegraf', () => {
   });
 
   afterEach(() => vi.restoreAllMocks());
+
+  it.each(['missing password', 'invalid reference', 'port conflict'])(
+    'blocks direct downloads with additional-service %s',
+    async reason => {
+      const store = useAppStore();
+      store.updateTimeSeriesData(false);
+      const service = parseThirdPartyServiceCatalog(
+        readFileSync('public/third-party-services.yaml', 'utf8')
+      ).find(service => service.id === 'pgadmin')!;
+      const values = initializeThirdPartyValues(service, {
+        administratorEmail: 'admin@example.local',
+        administratorPassword: 'valid-password',
+      });
+      if (reason === 'missing password') delete values.administratorPassword;
+      if (reason === 'invalid reference') values.administratorEmail = '{{ services.missing.host }}';
+      const additions = buildThirdPartyServiceCompose(service, values);
+      if (reason === 'port conflict') additions.pgadmin!.ports = ['127.0.0.1:8082:80'];
+      store.setThirdPartyServices([{ id: service.id, values }], additions, ['pgadmin']);
+      const generate = vi.spyOn(JSZip.prototype, 'generateAsync').mockResolvedValue(new Blob());
+      const wrapper = await download();
+      expect(generate).not.toHaveBeenCalled();
+      expect(wrapper.text()).toContain('before downloading');
+      if (reason === 'port conflict') expect(wrapper.text()).toContain('host port 8082');
+      wrapper.unmount();
+    }
+  );
 
   it('downloads local InfluxDB without requiring or bundling Telegraf configuration', async () => {
     const store = useAppStore();

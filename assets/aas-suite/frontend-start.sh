@@ -7,22 +7,47 @@ fi
 FRONTEND_API_BASE_URL="${FRONTEND_API_BASE_URL%/}"
 FRONTEND_FEEDMAPPING_BASE_URL="${FRONTEND_FEEDMAPPING_BASE_URL%/}"
 GATEWAY_BASE_URL="${FRONTEND_API_BASE_URL%/designer-api}"
+# Encode environment values as JSON string literals, including controls and trailing newlines.
+json_string() {
+  printf '%s.' "$1" | LC_ALL=C awk '
+    BEGIN { for (i = 0; i < 32; i++) control[sprintf("%c", i)] = sprintf("\\u%04x", i) }
+    { if (NR > 1) value = value "\n"; value = value $0 }
+    END {
+      value = substr(value, 1, length(value) - 1)
+      printf "\""
+      for (i = 1; i <= length(value); i++) {
+        c = substr(value, i, 1)
+        if (c == "\\") printf "\\\\"
+        else if (c == "\"") printf "\\\""
+        else if (c == "\047") printf "\\u0027"
+        else if (c == "<") printf "\\u003c"
+        else if (c == "`") printf "\\u0060"
+        else if (c == "$") printf "\\u0024"
+        else if (c in control) printf "%s", control[c]
+        else printf "%s", c
+      }
+      printf "\""
+    }'
+}
+
+# The same encoded content is safe in either quote style in existing JS bundles.
+sed_replacement() {
+  json_string "$1" | sed 's/^"//; s/"$//; s/[\\&|]/\\&/g'
+}
+
 RUNTIME_CONFIG_FILE="$ROOT_DIR/runtime-config.js"
-cat >"$RUNTIME_CONFIG_FILE" <<EOF
-window.__AAS_FRONTEND_API_BASE_URL = "${FRONTEND_API_BASE_URL}";
-window.__AAS_FRONTEND_FEEDMAPPING_BASE_URL = "${FRONTEND_FEEDMAPPING_BASE_URL}";
-EOF
-ESCAPED_API_BASE_URL="$(printf '%s' "${FRONTEND_API_BASE_URL}" | sed 's/[&|]/\\&/g')"
-ESCAPED_API_BASE_URL_WITH_SLASH="$(printf '%s/' "${FRONTEND_API_BASE_URL}" | sed 's/[&|]/\\&/g')"
-DESIGNER_BASE_URL="${FRONTEND_API_BASE_URL}"
-ESCAPED_DESIGNER_BASE_URL="$(printf '%s' "$DESIGNER_BASE_URL" | sed 's/[&|]/\\&/g')"
-ESCAPED_GATEWAY_BASE_URL="$(printf '%s' "$GATEWAY_BASE_URL" | sed 's/[&|]/\\&/g')"
-find "$ROOT_DIR" -type f -name '*.js' -exec sed -i "s|http://localhost:5196/designer-api|$ESCAPED_API_BASE_URL|g" {} +
-find "$ROOT_DIR" -type f -name '*.js' -exec sed -i "s|http://localhost:5196/designer|$ESCAPED_DESIGNER_BASE_URL|g" {} +
-find "$ROOT_DIR" -type f -name '*.js' -exec sed -i "s|http://localhost:5196|$ESCAPED_GATEWAY_BASE_URL|g" {} +
-find "$ROOT_DIR" -type f -name '*.js' -exec sed -i "s|strictDiscoveryDocumentValidation:!1,skipIssuerCheck:!0|strictDiscoveryDocumentValidation:!1,skipIssuerCheck:!0,requireHttps:!1|g" {} +
-find "$ROOT_DIR" -type f -name '*.js' -exec sed -i "s|strictDiscoveryDocumentValidation:false,skipIssuerCheck:true|strictDiscoveryDocumentValidation:false,skipIssuerCheck:true,requireHttps:false|g" {} +
-find "$ROOT_DIR" -type f -name '*.js' -exec sed -i 's|requireHttps:\"remoteOnly\"|requireHttps:!1|g' {} +
+printf 'window.__AAS_FRONTEND_API_BASE_URL = %s;\nwindow.__AAS_FRONTEND_FEEDMAPPING_BASE_URL = %s;\n' \
+  "$(json_string "$FRONTEND_API_BASE_URL")" "$(json_string "$FRONTEND_FEEDMAPPING_BASE_URL")" >"$RUNTIME_CONFIG_FILE"
+ESCAPED_API_BASE_URL="$(sed_replacement "$FRONTEND_API_BASE_URL")"
+ESCAPED_API_BASE_URL_WITH_SLASH="$(sed_replacement "$FRONTEND_API_BASE_URL/")"
+ESCAPED_DESIGNER_BASE_URL="$ESCAPED_API_BASE_URL"
+ESCAPED_GATEWAY_BASE_URL="$(sed_replacement "$GATEWAY_BASE_URL")"
+find "$ROOT_DIR" -type f -name '*.js' ! -name 'runtime-config.js' -exec sed -i "s|http://localhost:5196/designer-api|$ESCAPED_API_BASE_URL|g" {} +
+find "$ROOT_DIR" -type f -name '*.js' ! -name 'runtime-config.js' -exec sed -i "s|http://localhost:5196/designer|$ESCAPED_DESIGNER_BASE_URL|g" {} +
+find "$ROOT_DIR" -type f -name '*.js' ! -name 'runtime-config.js' -exec sed -i "s|http://localhost:5196|$ESCAPED_GATEWAY_BASE_URL|g" {} +
+find "$ROOT_DIR" -type f -name '*.js' ! -name 'runtime-config.js' -exec sed -i "s|strictDiscoveryDocumentValidation:!1,skipIssuerCheck:!0|strictDiscoveryDocumentValidation:!1,skipIssuerCheck:!0,requireHttps:!1|g" {} +
+find "$ROOT_DIR" -type f -name '*.js' ! -name 'runtime-config.js' -exec sed -i "s|strictDiscoveryDocumentValidation:false,skipIssuerCheck:true|strictDiscoveryDocumentValidation:false,skipIssuerCheck:true,requireHttps:false|g" {} +
+find "$ROOT_DIR" -type f -name '*.js' ! -name 'runtime-config.js' -exec sed -i 's|requireHttps:\"remoteOnly\"|requireHttps:!1|g' {} +
 CONFIG_FILE="$ROOT_DIR/config/app-config.json"
 if [ -f "$CONFIG_FILE" ]; then
   sed -i "s|http://localhost:5196/designer/|$ESCAPED_API_BASE_URL_WITH_SLASH|g" "$CONFIG_FILE"

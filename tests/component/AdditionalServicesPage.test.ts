@@ -271,9 +271,16 @@ describe('Additional services page', () => {
     const updatedCompose = useAppStore().getDockerComposeConfig?.value as {
       services: Record<string, { environment?: Record<string, string> }>;
     };
-    expect(updatedCompose.services.redis).toBeUndefined();
-    expect(updatedCompose.services.worker).toBeUndefined();
+    // Keep the last valid output while an intermediate edit has unresolved references.
+    expect(updatedCompose.services.redis).toBeDefined();
+    expect(updatedCompose.services.worker?.environment?.REDIS_URL).toBe('redis://redis:6379');
     expect(wrapper.text()).toContain('Fix service references before continuing.');
+    expect(
+      wrapper
+        .findAll('button')
+        .find(button => button.text().trim() === 'Next')!
+        .attributes('disabled')
+    ).toBeDefined();
   });
 
   it('offers generated placeholders from the selected service catalogue', async () => {

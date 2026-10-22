@@ -86,6 +86,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useAppStore } from '@/stores/app';
+import { publishedPort, replacePublishedPort } from '@/utils/composePorts';
 import {
   chooseDefaultTag,
   classifyTag,
@@ -189,8 +190,8 @@ function readExternalPort(service: DockerComposeService | undefined): number | u
   if (!portMapping) {
     return undefined;
   }
-  const port = Number(portMapping.split(':').at(-2));
-  return Number.isInteger(port) && port > 0 ? port : undefined;
+  const port = publishedPort(portMapping);
+  return port !== undefined && Number.isInteger(port) && port > 0 ? port : undefined;
 }
 
 function resolveTagInput(tagInput: unknown): string {
@@ -433,11 +434,7 @@ function updateDockerPort(): void {
     if (!currentMapping) {
       return;
     }
-    const parts = currentMapping.split(':');
-    if (parts.length >= 2) {
-      parts[parts.length - 2] = String(externalPort.value);
-      service.ports[0] = parts.join(':');
-    }
+    service.ports[0] = replacePublishedPort(currentMapping, externalPort.value);
   }
 
   appStore.setDockerComposeConfig(localDockerComposeConfig);

@@ -1,6 +1,7 @@
 // Utilities
 import * as yaml from 'js-yaml';
 import { defineStore } from 'pinia';
+import { replacePublishedPort } from '@/utils/composePorts';
 import { readServiceEnvironment } from '@/utils/dockerEnvironment';
 import {
   buildAasEnvironmentExternalUrl,
@@ -15,6 +16,7 @@ import {
   replaceExplicitUrlPort,
   replaceUrlPath,
 } from '@/utils/externalUrls';
+import { mergeGeneratedConfig } from '@/utils/mergeGeneratedConfig';
 import { DEFAULT_POLICY, defaultTrustList } from '@/utils/securitySetup';
 import { getHttpOrigin, parseTrustedOrigin } from '@/utils/trustedOrigins';
 
@@ -68,6 +70,8 @@ export interface ThirdPartyServiceSelection {
 }
 
 interface DockerComposeService {
+  image?: string;
+  container_name?: string;
   ports?: string[];
   environment?: Record<string, string> | string[];
 }
@@ -100,6 +104,7 @@ export interface SerializableStarterState {
   localInfluxDbOriginOptOutKey?: string;
   thirdPartyServices?: ThirdPartyServiceSelection[];
   thirdPartyArchitecture?: 'amd64' | 'arm64';
+  thirdPartyServiceDefaults?: Record<string, DockerComposeService>;
 }
 
 function cloneSerializable<T>(value: T): T {
@@ -622,9 +627,7 @@ function setDockerComposeServicePort(
   if (!currentMapping) {
     return;
   }
-  const parts = currentMapping.split(':');
-  const internal = parts.length >= 2 ? parts[1] : String(port);
-  service.ports[0] = `${port}:${internal}`;
+  service.ports[0] = replacePublishedPort(currentMapping, port);
 }
 
 function setDockerComposeServiceContextPath(
@@ -1004,6 +1007,7 @@ function initialState() {
     localInfluxDbOriginOptOutKey: undefined as string | undefined,
     localInfluxDbWasPresent: false,
     thirdPartyServices: [] as ThirdPartyServiceSelection[],
+    thirdPartyServiceDefaults: {} as Record<string, DockerComposeService>,
     thirdPartyArchitecture: undefined as 'amd64' | 'arm64' | undefined,
 
     // legacy config slots (kept to avoid breakage while migrating pages)
@@ -1297,8 +1301,18 @@ export const useAppStore = defineStore('app', {
         ...Object.fromEntries(
           Object.entries(existing).filter(([serviceId]) => !managedServiceIds.includes(serviceId))
         ),
-        ...cloneSerializable(additions),
+        ...Object.fromEntries(
+          Object.entries(additions).map(([id, service]) => [
+            id,
+            mergeGeneratedConfig(
+              existing[id],
+              this.thirdPartyServiceDefaults[id],
+              cloneSerializable(service)
+            ),
+          ])
+        ),
       };
+      this.thirdPartyServiceDefaults = cloneSerializable(additions);
       this.thirdPartyServices = cloneSerializable(selections);
       const thirdPartyOutput: BasyxConfigItem | undefined = Object.keys(additions).length
         ? {
@@ -1615,6 +1629,7 @@ export const useAppStore = defineStore('app', {
         managedInfluxDbOrigin: this.managedInfluxDbOrigin,
         localInfluxDbOriginOptOutKey: this.localInfluxDbOriginOptOutKey,
         thirdPartyServices: this.thirdPartyServices,
+        thirdPartyServiceDefaults: this.thirdPartyServiceDefaults,
         thirdPartyArchitecture: this.thirdPartyArchitecture,
       });
     },
@@ -1661,6 +1676,11 @@ export const useAppStore = defineStore('app', {
       }
       if (isContextPathArray(data.contextPathes)) {
         this.contextPathes = cloneSerializable(data.contextPathes);
+      }
+      if (isRecord(data.thirdPartyServiceDefaults)) {
+        this.thirdPartyServiceDefaults = cloneSerializable(
+          data.thirdPartyServiceDefaults
+        ) as Record<string, DockerComposeService>;
       }
       if (data.thirdPartyArchitecture === 'amd64' || data.thirdPartyArchitecture === 'arm64') {
         this.thirdPartyArchitecture = data.thirdPartyArchitecture;

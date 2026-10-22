@@ -55,7 +55,7 @@
       />
 
       <v-alert v-if="portConflicts.length" type="warning" variant="tonal" class="mb-6">
-        {{ portConflicts.join(' ') }} Choose a different host port in the catalogue before
+        {{ portConflicts.join(' ') }} Choose a different host port in Container Config before
         downloading this setup.
       </v-alert>
 
@@ -254,11 +254,12 @@ import type { ComposeService } from '@/utils/optionalServices';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { type ThirdPartyServiceSelection, useAppStore } from '@/stores/app';
 import { type ClientArchitecture, detectClientArchitecture } from '@/utils/clientArchitecture';
+import { findComposePortConflicts } from '@/utils/composePorts';
 import {
   buildThirdPartyServiceCompose,
   defaultThirdPartyValues,
   initializeThirdPartyValues,
-  parseThirdPartyServiceCatalog,
+  loadThirdPartyServiceCatalog,
   resolveThirdPartyServiceReferences,
   thirdPartyFieldError,
   thirdPartyManagedServiceIds,
@@ -313,7 +314,9 @@ const isConfigurationComplete = computed(
   () =>
     selectedServices().every(service =>
       service.configuration.every(field => !fieldError(service.id, field))
-    ) && referenceResolution.value.errors.length === 0
+    ) &&
+    referenceResolution.value.errors.length === 0 &&
+    portConflicts.value.length === 0
 );
 
 const missingRequiredFields = computed(() =>
@@ -325,35 +328,10 @@ const missingRequiredFields = computed(() =>
 );
 
 const portConflicts = computed(() => {
-  const seen = new Map<string, string>();
-  const conflicts: string[] = [];
   const compose = appStore.getDockerComposeConfig?.value as
-    { services?: Record<string, { ports?: string[] }> } | undefined;
-  Object.entries(compose?.services || {}).forEach(([id, service]) => {
-    (service.ports || []).forEach(port => seen.set(hostPort(port), id));
-  });
-  selectedServices().forEach(service => {
-    Object.entries(
-      buildThirdPartyServiceCompose(
-        service,
-        referenceResolution.value.values[service.id] || valuesFor(service.id)
-      )
-    ).forEach(([id, composeService]) => {
-      portsFor(composeService).forEach(port => {
-        const host = hostPort(port);
-        const existing = seen.get(host);
-        if (existing && existing !== id) {
-          conflicts.push(`${service.name} uses host port ${host}, already used by ${existing}.`);
-        }
-      });
-    });
-  });
-  return [...new Set(conflicts)];
+    { services?: Record<string, ComposeService> } | undefined;
+  return findComposePortConflicts(compose?.services || {});
 });
-
-function hostPort(mapping: string): string {
-  return mapping.split(':').at(-2) || mapping;
-}
 
 function valuesFor(serviceId: string): FieldValues {
   return (selected.value[serviceId] ||= {});
@@ -522,9 +500,10 @@ function baseComposeServices(): Record<string, Record<string, unknown>> {
   const compose = appStore.getDockerComposeConfig?.value;
   if (!compose || typeof compose !== 'object' || !('services' in compose)) return {};
   const managedIds = new Set(thirdPartyManagedServiceIds(services.value));
+  const selectedIds = new Set(selectedServices().flatMap(service => Object.keys(service.compose)));
   return Object.fromEntries(
     Object.entries(compose.services as Record<string, Record<string, unknown>>).filter(
-      ([serviceId]) => !managedIds.has(serviceId)
+      ([serviceId]) => !managedIds.has(serviceId) || selectedIds.has(serviceId)
     )
   );
 }
@@ -537,23 +516,25 @@ function applySettings(): void {
       Object.entries(valuesFor(service.id)).filter(([, value]) => value !== undefined)
     ) as Record<string, string | number | boolean>,
   }));
-  const additions = referenceResolution.value.errors.length
-    ? {}
-    : Object.assign(
-        {},
-        ...enabled.map(service =>
-          buildThirdPartyServiceCompose(
-            service,
-            referenceResolution.value.values[service.id] || valuesFor(service.id)
-          )
-        )
-      );
+  if (referenceResolution.value.errors.length) {
+    appStore.thirdPartyServices = selections;
+    return;
+  }
+  const additions = Object.assign(
+    {},
+    ...enabled.map(service =>
+      buildThirdPartyServiceCompose(
+        service,
+        referenceResolution.value.values[service.id] || valuesFor(service.id)
+      )
+    )
+  );
   const managedIds = thirdPartyManagedServiceIds(services.value);
   appStore.setThirdPartyServices(selections, additions, managedIds);
 }
 
 function goNext(): void {
-  navigateTo('/get-started/deployment/container-config');
+  if (isConfigurationComplete.value) navigateTo('/get-started/deployment/container-config');
 }
 
 watch(
@@ -566,16 +547,15 @@ watch(
 
 onMounted(async () => {
   try {
-    const [response, detected] = await Promise.all([
-      fetch('/third-party-services.yaml'),
+    const [catalog, detected] = await Promise.all([
+      loadThirdPartyServiceCatalog(),
       detectClientArchitecture(),
     ]);
     detectedArchitecture.value = detected;
     const savedArchitecture = appStore.thirdPartyArchitecture;
     architecture.value = savedArchitecture || (detected === 'arm64' ? 'arm64' : 'amd64');
     appStore.thirdPartyArchitecture = architecture.value;
-    if (!response.ok) throw new Error(`Catalogue request failed: ${response.status}`);
-    services.value = parseThirdPartyServiceCatalog(await response.text());
+    services.value = catalog;
     const restored = new Map(
       appStore.getThirdPartyServices.map(selection => [selection.id, selection.values])
     );

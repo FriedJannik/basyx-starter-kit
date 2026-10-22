@@ -95,6 +95,28 @@ afterEach(() => {
 });
 
 describe('third-party CPU architecture switch', () => {
+  it('blocks progression on actual port conflicts and accepts a corrected binding', async () => {
+    const store = useAppStore();
+    store.initializeStarterDefaults();
+    const wrapper = await openPage('arm');
+    await wrapper
+      .findAll('button')
+      .find(button => button.text() === 'Add')!
+      .trigger('click');
+    await flushPromises();
+    const config = JSON.parse(JSON.stringify(store.getDockerComposeConfig!));
+    config.value.services.cache.ports = ['127.0.0.1:8082:80'];
+    store.setDockerComposeConfig(config);
+    await flushPromises();
+    const next = wrapper.findAll('button').find(button => button.text().trim() === 'Next')!;
+    expect(next.attributes('disabled')).toBeDefined();
+    expect(wrapper.text()).toContain('host port 8082');
+    store.setContainerPort('cache', 8089);
+    await flushPromises();
+    expect(next.attributes('disabled')).toBeUndefined();
+    wrapper.unmount();
+  });
+
   it('defaults to browser ARM64 and switches all catalogue defaults to AMD64', async () => {
     useAppStore().initializeStarterDefaults();
     const wrapper = await openPage('arm');
