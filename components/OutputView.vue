@@ -224,6 +224,9 @@ const selectedRawConfig = computed(() => {
     case 'cfg-basyx-infra':
       return appStore.getBasyxInfraConfigAsString;
     default:
+      if (nodeId.startsWith('cfg-third-party-')) {
+        return appStore.getDockerComposeConfigService(nodeId.slice('cfg-third-party-'.length));
+      }
       return undefined;
   }
 });

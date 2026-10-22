@@ -126,8 +126,22 @@ const loadingTags = ref(false);
 const tagLoadError = ref('');
 
 const dockerComposeConfigObject = computed(() => appStore.getDockerComposeConfig);
-const servicePort = computed(() => appStore.getContainerPort(props.serviceName));
-const serviceContainerName = computed(() => appStore.getContainerName(props.serviceName));
+const composeService = computed(() => {
+  const compose = dockerComposeConfigObject.value?.value;
+  if (!compose || typeof compose !== 'object' || !('services' in compose)) {
+    return undefined;
+  }
+  return (compose.services as Record<string, DockerComposeService>)[props.serviceName];
+});
+const servicePort = computed(
+  () => appStore.getContainerPort(props.serviceName) ?? readExternalPort(composeService.value)
+);
+const serviceContainerName = computed(
+  () =>
+    appStore.getContainerName(props.serviceName) ??
+    composeService.value?.container_name ??
+    props.serviceName
+);
 const managedRepository = computed(() => MANAGED_REPOSITORIES[props.serviceName] || '');
 const isBasyxGoService = computed(
   () => props.serviceName === 'aas-environment' || props.serviceName === 'basyx_configuration'
@@ -168,6 +182,15 @@ function parseImageTag(image: string | undefined): string {
     return '';
   }
   return parts[parts.length - 1] || '';
+}
+
+function readExternalPort(service: DockerComposeService | undefined): number | undefined {
+  const portMapping = service?.ports?.[0];
+  if (!portMapping) {
+    return undefined;
+  }
+  const port = Number(portMapping.split(':').at(-2));
+  return Number.isInteger(port) && port > 0 ? port : undefined;
 }
 
 function resolveTagInput(tagInput: unknown): string {
@@ -411,8 +434,10 @@ function updateDockerPort(): void {
       return;
     }
     const parts = currentMapping.split(':');
-    const internal = parts.length >= 2 ? parts[1] : String(externalPort.value);
-    service.ports[0] = `${externalPort.value}:${internal}`;
+    if (parts.length >= 2) {
+      parts[parts.length - 2] = String(externalPort.value);
+      service.ports[0] = parts.join(':');
+    }
   }
 
   appStore.setDockerComposeConfig(localDockerComposeConfig);

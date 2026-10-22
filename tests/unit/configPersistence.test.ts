@@ -79,6 +79,29 @@ describe('configPersistence', () => {
     expect(environment.SERVER_PORT).toBe('8082');
   });
 
+  it('strips AAS Suite database connection strings from shared configurations', () => {
+    const state = createState();
+    state.dockerComposeConfig = {
+      name: 'docker-compose.yml',
+      value: {
+        services: {
+          gateway: {
+            environment: { Session__Postgres__ConnectionString: 'Host=db;Password=private' },
+          },
+          designer: {
+            environment: [
+              'ConnectionStrings__PgDatabase=Host=db;Password=private',
+              'SERVER_PORT=8080',
+            ],
+          },
+        },
+      },
+    };
+    const decoded = decodeConfigHash(encodeConfigHash({ route: '/get-started/download', state }));
+    expect(JSON.stringify(decoded.payload)).not.toContain('private');
+    expect(JSON.stringify(decoded.payload)).toContain('SERVER_PORT=8080');
+  });
+
   it('returns error for unsupported version', () => {
     const decoded = decodeConfigHash('v999.abcd');
     expect(decoded.error).toContain('Unsupported');

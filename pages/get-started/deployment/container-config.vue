@@ -21,11 +21,18 @@
 
     <ClientOnly>
       <v-expansion-panels class="setup-config-panels mt-8 mb-8">
-        <v-expansion-panel
-          v-for="service in servicesForConfig"
-          :key="service.id"
-          :title="service.title"
-        >
+        <v-expansion-panel v-for="service in servicesForConfig" :key="service.id">
+          <v-expansion-panel-title>
+            <span>{{ service.title }}</span>
+            <v-chip
+              class="ml-3"
+              size="small"
+              :color="service.kind === 'third-party' ? 'secondary' : 'primary'"
+              variant="tonal"
+            >
+              {{ service.kind === 'third-party' ? '3rd party' : 'Core service' }}
+            </v-chip>
+          </v-expansion-panel-title>
           <v-expansion-panel-text>
             <DockerConfig :service-name="service.id" />
           </v-expansion-panel-text>
@@ -39,7 +46,10 @@
     </ClientOnly>
 
     <v-card-actions class="px-0 mb-8">
-      <v-btn variant="tonal" prepend-icon="mdi-arrow-left" to="/get-started/deployment/integration"
+      <v-btn
+        variant="tonal"
+        prepend-icon="mdi-arrow-left"
+        to="/get-started/deployment/additional-services"
         >Back</v-btn
       >
       <v-spacer />
@@ -95,18 +105,29 @@ const serviceOrder = [
   'telegraf',
 ];
 
+interface ServiceForConfig {
+  id: string;
+  title: string;
+  kind: 'core' | 'third-party';
+}
+
 const servicesForConfig = computed(() => {
   const config = dockerCompose.value;
   if (!config || typeof config === 'string' || !('services' in config)) {
-    return [] as Array<{ id: string; title: string }>;
+    return [] as ServiceForConfig[];
   }
 
   const services = config.services as Record<string, unknown>;
-  return serviceOrder
+  const knownServices = serviceOrder
     .filter(id => Boolean(services[id]))
     .map(id => ({
       id,
       title: serviceLabelMap[id] || id,
+      kind: 'core' as const,
     }));
+  const additionalServices = Object.keys(services)
+    .filter(id => !serviceOrder.includes(id))
+    .map(id => ({ id, title: serviceLabelMap[id] || id, kind: 'third-party' as const }));
+  return [...knownServices, ...additionalServices];
 });
 </script>

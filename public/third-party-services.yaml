@@ -1,0 +1,394 @@
+# This catalogue is intentionally public: do not place credentials or private image references here.
+# Source: https://github.com/meta-level-public/aas-suite-community
+# Adapted from docker-oss/docker-compose.yml and tools/docker-compose-wizard/lib/common.sh
+# Upstream revision: a4a67c1e84a7de50361f24aa0e63a752dc11ba41 (AAS Suite 1.1.3).
+version: 1
+services:
+  - id: aas-suite-community
+    name: Meta-Level AAS Suite Community
+    description: >-
+      AAS Designer, viewer, Gateway, and Keycloak from the official Meta-Level Community deployment,
+      connected to this setup’s BaSyx infrastructure.
+    tags:
+      - aas
+      - suite
+      - designer
+      - viewer
+    # Remove the former BaSyx-only containers when restoring an older configuration.
+    legacyComposeIds:
+      - aas-suite-configuration
+      - aas-suite-registry
+      - aas-suite-submodel-registry
+      - aas-suite-discovery
+      - aas-suite-repository
+      - aas-suite-submodel-repository
+      - aas-suite-concept-description-repository
+    compose:
+      aas-suite-gateway:
+        image: ghcr.io/meta-level-public/aas-suite-community/aas-designer-gateway:{{ config.imageTag }}
+        ports:
+          - 127.0.0.1:5080:8080
+        environment:
+          ASPNETCORE_ENVIRONMENT: Production
+          ASPNETCORE_URLS: http://+:8080
+          Session__Postgres__ConnectionString: >-
+            Host=aas-suite-database;Port=5432;Database=aas_designer;Username=aas_user;Password={{
+            config.databasePassword | connectionString }}
+          Session__Postgres__SchemaName: public
+          Session__Postgres__TableName: gateway_session_cache
+          Session__Postgres__CreateIfNotExists: 'true'
+          Session__Postgres__ExpiredItemsDeletionInterval: '00:30:00'
+          Session__Postgres__DefaultSlidingExpiration: '08:00:00'
+          ReverseProxy__Clusters__keycloak-cluster__Destinations__destination1__Address: http://aas-suite-keycloak:8080
+          ReverseProxy__Clusters__aas-designer-cluster__Destinations__destination1__Address: http://aas-suite-designer:8080
+          ReverseProxy__Clusters__frontend-cluster__Destinations__destination1__Address: http://aas-suite-frontend:80
+          AppSettings__KeycloakEnabled: 'true'
+          AppSettings__KeycloakSsoSourceName: keycloak
+          AppSettings__KeycloakIssuer: http://aas-suite-keycloak:8080/realms/aas-local
+          AppSettings__KeycloakWellKnownUrl: http://aas-suite-keycloak:8080/realms/aas-local/.well-known/openid-configuration
+          AppSettings__KeycloakPublicIssuer: '{{ config.publicUrl }}/realms/aas-local'
+          AppSettings__KeycloakPublicWellKnownUrl: '{{ config.publicUrl }}/realms/aas-local/.well-known/openid-configuration'
+          AppSettings__KeycloakClientId: aas-designer-local
+          AppSettings__KeycloakAudience: aas-designer-local
+          AppSettings__KeycloakScopes: openid profile email roles
+          GatewayBackend__FrontendLoginPath: /login
+        volumes:
+          - ./aas-suite/gateway-keys:/var/lib/vws-gateway/keys
+        depends_on:
+          aas-suite-database:
+            condition: service_healthy
+          aas-suite-keycloak:
+            condition: service_healthy
+        healthcheck:
+          test:
+            - CMD-SHELL
+            - >-
+              if command -v curl >/dev/null 2>&1; then curl -fsS http://127.0.0.1:8080/health
+              >/dev/null || exit 1; else kill -0 1; fi
+          interval: 10s
+          timeout: 5s
+          retries: 12
+          start_period: 30s
+        restart: unless-stopped
+      aas-suite-designer:
+        image: >-
+          ghcr.io/meta-level-public/aas-suite-community/aas-designer-backend-community:{{
+          config.imageTag }}
+        environment:
+          ASPNETCORE_ENVIRONMENT: Production
+          ASPNETCORE_URLS: http://+:8080
+          ConnectionStrings__PgDatabase: >-
+            Host=aas-suite-database;Port=5432;Database=aas_designer;Username=aas_user;Password={{
+            config.databasePassword | connectionString }}
+          ConnectionStrings__DefaultConnection: >-
+            Host=aas-suite-database;Port=5432;Database=aas_designer;Username=aas_user;Password={{
+            config.databasePassword | connectionString }}
+          AppSettings__KeycloakEnabled: 'true'
+          AppSettings__KeycloakSsoSourceName: keycloak
+          AppSettings__KeycloakIssuer: http://aas-suite-keycloak:8080/realms/aas-local
+          AppSettings__KeycloakWellKnownUrl: http://aas-suite-keycloak:8080/realms/aas-local/.well-known/openid-configuration
+          AppSettings__KeycloakPublicIssuer: '{{ config.publicUrl }}/realms/aas-local'
+          AppSettings__KeycloakPublicWellKnownUrl: '{{ config.publicUrl }}/realms/aas-local/.well-known/openid-configuration'
+          AppSettings__KeycloakClientId: aas-designer-local
+          AppSettings__KeycloakAudience: aas-designer-local
+          AppSettings__KeycloakScopes: openid profile email roles
+          AppSettings__KeycloakResourceAccessName: aas-designer-local
+          AppSettings__KeycloakAdminRealm: master
+          AppSettings__KeycloakAdminClientId: admin-cli
+          AppSettings__KeycloakAdminUsername: admin
+          AppSettings__KeycloakAdminPassword: '{{ config.adminPassword }}'
+          AppSettings__KeycloakEmailClaimName: email
+          AppSettings__KeycloakFirstNameClaimName: given_name
+          AppSettings__KeycloakLastNameClaimName: family_name
+          AppSettings__InitialOrganisationAdminEmail: '{{ config.administratorEmail }}'
+          AppSettings__InitialOrganisationAdminName: Admin
+          AppSettings__InitialOrganisationAdminVorname: Initial
+          AppSettings__InitialOrganisationAdminPassword: '{{ config.adminPassword }}'
+          AppSettings__Issuer: vws-portal
+          AppSettings__Salt: '{{ config.jwtSalt }}'
+          AppSettings__Secret: '{{ config.jwtSecret }}'
+          AppSettings__BaseUrl: '{{ config.publicUrl }}'
+          AppSettings__PublicBaseApiUrl: '{{ config.publicUrl }}/designer-api/api'
+          AppSettings__InitialAasDiscoveryUrl: '{{ config.basyxUrl }}'
+          AppSettings__InitialAasDiscoveryVersion: '-'
+          AppSettings__InitialAasRegistryUrl: '{{ config.basyxUrl }}'
+          AppSettings__InitialAasRegistryVersion: '-'
+          AppSettings__InitialSubmodelRegistryUrl: '{{ config.basyxUrl }}'
+          AppSettings__InitialSubmodelRegistryVersion: '-'
+          AppSettings__InitialAasRepositoryUrl: '{{ config.basyxUrl }}'
+          AppSettings__InitialAasRepositoryVersion: '-'
+          AppSettings__InitialSubmodelRepositoryUrl: '{{ config.basyxUrl }}'
+          AppSettings__InitialSubmodelRepositoryVersion: '-'
+          AppSettings__InitialConceptDescriptionRepositoryUrl: '{{ config.basyxUrl }}'
+          AppSettings__InitialConceptDescriptionRepositoryVersion: '-'
+          AppSettings__SingleTenantMode: 'true'
+          AppSettings__HandleInitialInfrastructureAsInternal: 'false'
+          AppSettings__FileStoragePath: /app/storage
+          AppSettings__PluginsEnabled: 'true'
+          AppSettings__PluginDirectory: /app/plugins
+          Gateway__Url: http://aas-suite-gateway:8080
+        volumes:
+          - ./aas-suite/storage:/app/storage
+          - ./aas-suite/plugins:/app/plugins:ro
+        depends_on:
+          aas-suite-database:
+            condition: service_healthy
+          aas-suite-keycloak:
+            condition: service_healthy
+        healthcheck:
+          test:
+            - CMD-SHELL
+            - >-
+              if command -v curl >/dev/null 2>&1; then curl -fsS http://127.0.0.1:8080/api/hc
+              >/dev/null || exit 1; else kill -0 1; fi
+          interval: 10s
+          timeout: 5s
+          retries: 12
+          start_period: 30s
+        restart: unless-stopped
+      aas-suite-frontend:
+        image: >-
+          ghcr.io/meta-level-public/aas-suite-community/aas-designer-frontend-community:{{
+          config.imageTag }}
+        environment:
+          API_URL: http://aas-suite-designer:8080
+          GATEWAY_URL: http://aas-suite-gateway:8080
+          FRONTEND_API_BASE_URL: '{{ config.publicUrl }}/designer-api'
+          FRONTEND_FEEDMAPPING_BASE_URL: '{{ config.publicUrl }}'
+        entrypoint:
+          - /bin/sh
+          - /opt/aas-suite/frontend-start.sh
+        volumes:
+          - ./aas-suite/frontend-start.sh:/opt/aas-suite/frontend-start.sh:ro
+        depends_on:
+          aas-suite-gateway:
+            condition: service_healthy
+        healthcheck:
+          test:
+            - CMD-SHELL
+            - wget -q -O /dev/null http://127.0.0.1:80 || exit 1
+          interval: 10s
+          timeout: 5s
+          retries: 10
+          start_period: 20s
+        restart: unless-stopped
+      aas-suite-database:
+        image: postgres:16-alpine
+        environment:
+          POSTGRES_USER: aas_user
+          POSTGRES_DB: aas_designer
+          POSTGRES_PASSWORD: '{{ config.databasePassword }}'
+        volumes:
+          - ./aas-suite/postgres:/var/lib/postgresql/data
+        healthcheck:
+          test:
+            - CMD-SHELL
+            - pg_isready -U aas_user -d aas_designer
+          interval: 10s
+          timeout: 5s
+          retries: 5
+        restart: unless-stopped
+      aas-suite-keycloak-database:
+        image: postgres:16-alpine
+        environment:
+          POSTGRES_USER: keycloak
+          POSTGRES_DB: keycloak
+          POSTGRES_PASSWORD: '{{ config.databasePassword }}'
+        volumes:
+          - ./aas-suite/keycloak-postgres:/var/lib/postgresql/data
+        healthcheck:
+          test:
+            - CMD-SHELL
+            - pg_isready -U keycloak -d keycloak
+          interval: 10s
+          timeout: 5s
+          retries: 5
+        restart: unless-stopped
+      aas-suite-keycloak:
+        image: quay.io/keycloak/keycloak:26.0
+        command: >-
+          start-dev --http-port=8080 --hostname-strict=false --proxy-headers=xforwarded
+          --import-realm
+        environment:
+          KC_DB: postgres
+          KC_DB_URL_HOST: aas-suite-keycloak-database
+          KC_DB_URL_DATABASE: keycloak
+          KC_DB_USERNAME: keycloak
+          KC_DB_PASSWORD: '{{ config.databasePassword }}'
+          KC_PROXY_HEADERS: xforwarded
+          KC_HOSTNAME_STRICT: 'false'
+          KC_BOOTSTRAP_ADMIN_USERNAME: admin
+          KC_BOOTSTRAP_ADMIN_PASSWORD: '{{ config.adminPassword }}'
+        volumes:
+          - ./aas-suite/realm.json:/opt/keycloak/data/import/aas-local-realm.json:ro
+        depends_on:
+          aas-suite-keycloak-database:
+            condition: service_healthy
+        healthcheck:
+          test:
+            - CMD-SHELL
+            - bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/8080'
+          interval: 10s
+          timeout: 5s
+          retries: 15
+          start_period: 30s
+        restart: unless-stopped
+    configuration:
+      - key: imageTag
+        label: AAS Suite image version
+        type: select
+        default: 1.1.3
+        # Used by the CPU architecture switch; omit when the normal tag supports ARM64.
+        arm64Default: 1.1.3-arm64
+        options:
+          - title: 1.1.3 (AMD64)
+            value: 1.1.3
+          - title: 1.1.3 (ARM64)
+            value: 1.1.3-arm64
+      - key: publicUrl
+        label: Public AAS Suite URL
+        type: text
+        default: http://localhost:{{ services.aas-suite-gateway.externalPort }}
+        required: true
+        description: >-
+          Browser-accessible Gateway URL, without a trailing slash. Match the published Gateway port
+          in Container Config.
+      - key: basyxUrl
+        label: BaSyx infrastructure URL
+        type: text
+        default: http://{{ services.aas-environment.host }}:{{ services.aas-environment.port }}
+        required: true
+        description: Internal base URL of this setup’s combined BaSyx AAS Environment.
+      - key: databasePassword
+        label: Suite database password
+        type: password
+        required: true
+      - key: administratorEmail
+        label: Initial administrator email
+        type: text
+        default: admin@example.local
+        required: true
+      - key: adminPassword
+        label: Initial administrator password
+        type: password
+        required: true
+        description: >-
+          Used for the initial Designer administrator and the dedicated Keycloak administrator
+          (username admin).
+      - key: jwtSalt
+        label: Application JWT salt
+        type: password
+        required: true
+        generate: base64-32
+        description: Generated automatically using 32 cryptographically random bytes.
+      - key: jwtSecret
+        label: Application JWT secret
+        type: password
+        required: true
+        generate: hex-32
+        minLength: 32
+        description: Generated automatically as 64 random hexadecimal characters for HMAC-SHA256 application tokens.
+
+  - id: mnestix-browser
+    name: Mnestix Browser
+    description: XITASO's open-source browser for exploring and editing Asset Administration Shells.
+    tags: [aas, browser, visualization, editing]
+    compose:
+      mnestix-browser:
+        image: mnestix/mnestix-browser:2.2.3
+        ports: ['127.0.0.1:3001:3000']
+        volumes:
+          - ./mnestix-browser:/app/prisma/database
+        restart: unless-stopped
+    configuration:
+      - key: aasRepositoryUrl
+        label: AAS repository URL
+        type: text
+        environment: AAS_REPO_API_URL
+        default: 'http://localhost:{{ services.aas-environment.externalPort }}'
+      - key: submodelRepositoryUrl
+        label: Submodel repository URL
+        type: text
+        environment: SUBMODEL_REPO_API_URL
+        default: 'http://localhost:{{ services.aas-environment.externalPort }}'
+      - key: aasRegistryUrl
+        label: AAS registry URL
+        type: text
+        environment: REGISTRY_API_URL
+        default: 'http://localhost:{{ services.aas-environment.externalPort }}'
+      - key: submodelRegistryUrl
+        label: Submodel registry URL
+        type: text
+        environment: SUBMODEL_REGISTRY_API_URL
+        default: 'http://localhost:{{ services.aas-environment.externalPort }}'
+      - key: discoveryUrl
+        label: Discovery URL
+        type: text
+        environment: DISCOVERY_API_URL
+        default: 'http://localhost:{{ services.aas-environment.externalPort }}'
+      - key: conceptDescriptionRepositoryUrl
+        label: Concept description repository URL
+        type: text
+        environment: CONCEPT_DESCRIPTION_REPO_API_URL
+        default: 'http://localhost:{{ services.aas-environment.externalPort }}'
+      - key: secretEncryptionKey
+        label: Secret encryption key
+        type: password
+        generate: base64-32
+        environment: SECRET_ENC_KEY
+        description: Generated automatically as a Base64-encoded 32-byte encryption key.
+        required: true
+
+  - id: david-sme-adapter
+    name: DAVID SME Adapter
+    description: HKA's DAVID adapter for publishing SMEs as Asset Administration Shells in BaSyx.
+    tags: [aas, sme, adapter, integration]
+    compose:
+      david-sme-adapter:
+        image: davidadap/sme-adapter:latest
+        ports: ['127.0.0.1:8080:8080']
+        volumes:
+          - ./david-sme-adapter:/app/data
+        restart: unless-stopped
+    configuration:
+      - key: basyxBaseUrl
+        label: BaSyx base URL
+        type: text
+        environment: BaSyx__BaseUrl
+        default: 'http://{{ services.aas-environment.host }}:{{ services.aas-environment.port }}'
+        description: Internal URL of the BaSyx AAS Environment used for publishing.
+      - key: autoSync
+        label: Synchronize automatically
+        type: switch
+        environment: BaSyx__AutoSync
+        default: true
+      - key: timeoutSeconds
+        label: BaSyx timeout (seconds)
+        type: number
+        environment: BaSyx__TimeoutSeconds
+        default: 100
+
+  - id: pgadmin
+    name: pgAdmin
+    description: Browser-based PostgreSQL administration for local development.
+    tags: [database, administration, development]
+    compose:
+      pgadmin:
+        image: dpage/pgadmin4:9.12
+        ports: ['127.0.0.1:5050:80']
+        volumes:
+          - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+        restart: unless-stopped
+    configuration:
+      - key: administratorEmail
+        label: Administrator email
+        type: text
+        environment: PGADMIN_DEFAULT_EMAIL
+        default: admin@example.local
+        required: true
+      - key: administratorPassword
+        label: Administrator password
+        type: password
+        environment: PGADMIN_DEFAULT_PASSWORD
+        description: Required by pgAdmin on first start.
+        required: true

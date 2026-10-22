@@ -38,6 +38,28 @@ const NumberInputStub = defineComponent({
     '<button class="number-input-update" @click="$emit(\'update:modelValue\', 9090)">port</button>',
 });
 
+const DisplayNumberInputStub = defineComponent({
+  name: 'DisplayNumberInputStub',
+  props: {
+    modelValue: {
+      type: Number,
+      default: undefined,
+    },
+  },
+  template: '<input class="external-port" :value="modelValue" />',
+});
+
+const DisplayTextFieldStub = defineComponent({
+  name: 'DisplayTextFieldStub',
+  props: {
+    modelValue: {
+      type: String,
+      default: undefined,
+    },
+  },
+  template: '<input class="container-name" :value="modelValue" />',
+});
+
 function flushPromises(): Promise<void> {
   return new Promise(resolve => {
     setTimeout(resolve, 0);
@@ -247,5 +269,42 @@ describe('DockerConfig', () => {
     expect(aasEnvironment?.ports).toEqual(['9090:9090']);
     expect(environment).toContain('SERVER_PORT=9090');
     expect(environment).toContain('GENERAL_EXTERNALURL=http://192.168.100.200:9090');
+  });
+
+  it('derives third-party container defaults from the Compose service', async () => {
+    const store = useAppStore();
+    store.initializeStarterDefaults();
+    store.setDockerComposeConfig({
+      name: 'docker-compose.yaml',
+      value: {
+        services: {
+          redis: {
+            image: 'redis:8.2.2-alpine',
+            ports: ['127.0.0.1:6379:6379'],
+          },
+        },
+      },
+    });
+
+    const wrapper = mount(DockerConfig, {
+      props: { serviceName: 'redis' },
+      global: {
+        stubs: {
+          'v-slide-y-transition': { template: '<div><slot /></div>' },
+          'v-combobox': ComboboxStub,
+          'v-list-item': { template: '<div><slot name="append" /></div>' },
+          'v-chip': { template: '<span><slot /></span>' },
+          'v-divider': { template: '<hr />' },
+          'v-number-input': DisplayNumberInputStub,
+          'v-text-field': DisplayTextFieldStub,
+        },
+      },
+    });
+
+    await flushPromises();
+    await nextTick();
+
+    expect((wrapper.find('.external-port').element as HTMLInputElement).value).toBe('6379');
+    expect((wrapper.find('.container-name').element as HTMLInputElement).value).toBe('redis');
   });
 });

@@ -80,6 +80,15 @@
         :class="isActive('/get-started/deployment/integration') ? 'text-primary' : 'text-subheader'"
       />
       <v-list-item
+        title="Additional Services"
+        to="/get-started/deployment/additional-services"
+        :class="
+          isActive('/get-started/deployment/additional-services')
+            ? 'text-primary'
+            : 'text-subheader'
+        "
+      />
+      <v-list-item
         title="Container Config"
         to="/get-started/deployment/container-config"
         :class="

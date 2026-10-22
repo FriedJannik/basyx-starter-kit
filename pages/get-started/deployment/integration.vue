@@ -107,7 +107,7 @@
         variant="tonal"
         color="primary"
         append-icon="mdi-arrow-right"
-        to="/get-started/deployment/container-config"
+        to="/get-started/deployment/additional-services"
         >Next</v-btn
       >
     </v-card-actions>
