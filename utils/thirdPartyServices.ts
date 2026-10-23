@@ -16,6 +16,7 @@ export interface ThirdPartyServiceField {
   key: string;
   label: string;
   type: ThirdPartyFieldType;
+  format?: 'base-url';
   environment?: string;
   /** Compose container id; inferred only for single-container entries. */
   service?: string;
@@ -73,6 +74,8 @@ function parseField(value: unknown, serviceId: string): ThirdPartyServiceField {
   if (!['text', 'number', 'password', 'switch', 'select'].includes(type)) {
     throw new Error(`Unsupported configuration field type '${type}' for ${serviceId}.`);
   }
+  if (value.format !== undefined && (type !== 'text' || value.format !== 'base-url'))
+    throw new Error(`Unsupported configuration field format for ${serviceId}.`);
   const options = Array.isArray(value.options)
     ? value.options.map(option => {
         if (!isRecord(option)) throw new Error(`Select option for ${serviceId} must be an object.`);
@@ -119,6 +122,7 @@ function parseField(value: unknown, serviceId: string): ThirdPartyServiceField {
     key: asString(value.key, `Configuration field key for ${serviceId}`),
     label: asString(value.label, `Configuration field label for ${serviceId}`),
     type,
+    format: value.format as ThirdPartyServiceField['format'],
     environment: typeof value.environment === 'string' ? value.environment : undefined,
     service:
       value.service === undefined
@@ -239,6 +243,21 @@ export function thirdPartyFieldError(
 ): string | undefined {
   if (field.required && (value === undefined || value === false || String(value).trim() === ''))
     return 'Required';
+  if (field.format === 'base-url' && value !== undefined && value !== '') {
+    try {
+      const url = new URL(String(value));
+      if (
+        !['http:', 'https:'].includes(url.protocol) ||
+        url.username ||
+        url.password ||
+        url.search ||
+        url.hash
+      )
+        return 'Use an HTTP(S) base URL without credentials, query parameters or a fragment.';
+    } catch {
+      return 'Use an HTTP(S) base URL.';
+    }
+  }
   if (
     field.minLength &&
     value !== undefined &&
@@ -247,6 +266,15 @@ export function thirdPartyFieldError(
   )
     return `Use at least ${field.minLength} characters.`;
   return undefined;
+}
+
+function normalizeFieldValue(
+  field: ThirdPartyServiceField,
+  value: ThirdPartyValue
+): ThirdPartyValue {
+  return field.format === 'base-url' && typeof value === 'string'
+    ? value.trim().replace(/\/+$/, '')
+    : value;
 }
 
 export function buildThirdPartyServiceCompose(
@@ -261,7 +289,7 @@ export function buildThirdPartyServiceCompose(
         (_match, key: string, connectionString: string | undefined) => {
           const field = service.configuration.find(candidate => candidate.key === key);
           if (!field) throw new Error(`Unknown configuration field '${key}' for ${service.id}.`);
-          let setting = String(values[key] ?? field.default ?? '');
+          let setting = String(normalizeFieldValue(field, values[key] ?? field.default) ?? '');
           if (connectionString) setting = `"${setting.replaceAll('"', '""')}"`;
           return setting.replaceAll('$', () => '$$');
         }
@@ -486,7 +514,10 @@ export function resolveThirdPartyServiceReferences(
 
     resolving.add(nodeId);
     const raw = selectedValues[serviceId]?.[key] ?? field.default;
-    const resolved = typeof raw === 'string' ? resolveText(raw, nodeId) : raw;
+    const resolved = normalizeFieldValue(
+      field,
+      typeof raw === 'string' ? resolveText(raw, nodeId) : raw
+    );
     resolving.delete(nodeId);
     (resolvedValues[serviceId] ||= {})[key] = resolved;
     return resolved;

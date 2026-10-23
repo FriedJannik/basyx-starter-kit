@@ -67,7 +67,9 @@ describe('third-party service catalogue', () => {
     );
 
     expect(resolution.errors).toEqual([]);
-    expect(resolution.values['mnestix-browser']?.aasRepositoryUrl).toBe('http://localhost:8082');
+    expect(resolution.values['mnestix-browser']?.aasRepositoryUrl).toBe(
+      'http://aas-environment:8082'
+    );
     expect(resolution.values['david-sme-adapter']?.basyxBaseUrl).toBe(
       'http://aas-environment:8082'
     );

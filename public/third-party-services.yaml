@@ -248,10 +248,11 @@ services:
       - key: publicUrl
         label: Public AAS Suite URL
         type: text
+        format: base-url
         default: http://localhost:{{ services.aas-suite-gateway.externalPort }}
         required: true
         description: >-
-          Browser-accessible Gateway URL, without a trailing slash. Match the published Gateway port
+          Browser-accessible Gateway URL. Match the published Gateway port
           in Container Config.
       - key: basyxUrl
         label: BaSyx infrastructure URL
@@ -305,32 +306,32 @@ services:
         label: AAS repository URL
         type: text
         environment: AAS_REPO_API_URL
-        default: 'http://localhost:{{ services.aas-environment.externalPort }}'
+        default: 'http://{{ services.aas-environment.host }}:{{ services.aas-environment.port }}'
       - key: submodelRepositoryUrl
         label: Submodel repository URL
         type: text
         environment: SUBMODEL_REPO_API_URL
-        default: 'http://localhost:{{ services.aas-environment.externalPort }}'
+        default: 'http://{{ services.aas-environment.host }}:{{ services.aas-environment.port }}'
       - key: aasRegistryUrl
         label: AAS registry URL
         type: text
         environment: REGISTRY_API_URL
-        default: 'http://localhost:{{ services.aas-environment.externalPort }}'
+        default: 'http://{{ services.aas-environment.host }}:{{ services.aas-environment.port }}'
       - key: submodelRegistryUrl
         label: Submodel registry URL
         type: text
         environment: SUBMODEL_REGISTRY_API_URL
-        default: 'http://localhost:{{ services.aas-environment.externalPort }}'
+        default: 'http://{{ services.aas-environment.host }}:{{ services.aas-environment.port }}'
       - key: discoveryUrl
         label: Discovery URL
         type: text
         environment: DISCOVERY_API_URL
-        default: 'http://localhost:{{ services.aas-environment.externalPort }}'
+        default: 'http://{{ services.aas-environment.host }}:{{ services.aas-environment.port }}'
       - key: conceptDescriptionRepositoryUrl
         label: Concept description repository URL
         type: text
         environment: CONCEPT_DESCRIPTION_REPO_API_URL
-        default: 'http://localhost:{{ services.aas-environment.externalPort }}'
+        default: 'http://{{ services.aas-environment.host }}:{{ services.aas-environment.port }}'
       - key: secretEncryptionKey
         label: Secret encryption key
         type: password

@@ -191,12 +191,19 @@ async function downloadAsZip(): Promise<void> {
   }
 
   try {
-    const additionalErrors = validateThirdPartyServices(
-      appStore.getThirdPartyServices.length ? await loadThirdPartyServiceCatalog() : [],
-      appStore.getThirdPartyServices,
-      getComposeServices() || {},
-      appStore.thirdPartyArchitecture
-    );
+    const catalog = appStore.getThirdPartyServices.length
+      ? await loadThirdPartyServiceCatalog()
+      : [];
+    const refreshErrors = appStore.refreshThirdPartyServices(catalog);
+    const additionalErrors = [
+      ...refreshErrors,
+      ...validateThirdPartyServices(
+        catalog,
+        appStore.getThirdPartyServices,
+        getComposeServices() || {},
+        appStore.thirdPartyArchitecture
+      ),
+    ];
     if (additionalErrors.length) {
       downloadError.value = `Review Additional Services and Container Config before downloading: ${additionalErrors.join(' ')}`;
       return;

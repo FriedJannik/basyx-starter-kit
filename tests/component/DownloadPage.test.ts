@@ -1,3 +1,4 @@
+import type { ComposeService } from '@/utils/optionalServices';
 import { flushPromises, mount } from '@vue/test-utils';
 import JSZip from 'jszip';
 import { readFileSync } from 'node:fs';
@@ -8,6 +9,7 @@ import {
   buildThirdPartyServiceCompose,
   initializeThirdPartyValues,
   parseThirdPartyServiceCatalog,
+  resolveThirdPartyServiceReferences,
 } from '@/utils/thirdPartyServices';
 
 vi.mock('@/utils/rsaKey', () => ({ generateRsaPrivateKeyPem: vi.fn(async () => 'test-key') }));
@@ -71,8 +73,12 @@ describe('download with optional Telegraf', () => {
       if (reason === 'missing password') delete values.administratorPassword;
       if (reason === 'invalid reference') values.administratorEmail = '{{ services.missing.host }}';
       const additions = buildThirdPartyServiceCompose(service, values);
-      if (reason === 'port conflict') additions.pgadmin!.ports = ['127.0.0.1:8082:80'];
       store.setThirdPartyServices([{ id: service.id, values }], additions, ['pgadmin']);
+      if (reason === 'port conflict') {
+        const config = JSON.parse(JSON.stringify(store.getDockerComposeConfig!));
+        config.value.services.pgadmin.ports = ['127.0.0.1:8082:80'];
+        store.setDockerComposeConfig(config);
+      }
       const generate = vi.spyOn(JSZip.prototype, 'generateAsync').mockResolvedValue(new Blob());
       const wrapper = await download();
       expect(generate).not.toHaveBeenCalled();
@@ -81,6 +87,43 @@ describe('download with optional Telegraf', () => {
       wrapper.unmount();
     }
   );
+
+  it('exports refreshed AAS Suite URLs after container port changes', async () => {
+    const store = useAppStore();
+    store.updateTimeSeriesData(false);
+    const service = parseThirdPartyServiceCatalog(
+      readFileSync('public/third-party-services.yaml', 'utf8')
+    ).find(service => service.id === 'aas-suite-community')!;
+    const values = initializeThirdPartyValues(service, {
+      databasePassword: 'dummy-db',
+      adminPassword: 'dummy-admin',
+    });
+    const base = (
+      store.getDockerComposeConfig!.value as {
+        services: Record<string, ComposeService>;
+      }
+    ).services;
+    const resolved = resolveThirdPartyServiceReferences([service], { [service.id]: values }, base);
+    store.setThirdPartyServices(
+      [{ id: service.id, values }],
+      buildThirdPartyServiceCompose(service, resolved.values[service.id]!),
+      Object.keys(service.compose)
+    );
+    store.setContainerPort('aas-suite-gateway', 5090);
+    const generate = vi.spyOn(JSZip.prototype, 'generateAsync').mockResolvedValue(new Blob());
+    const wrapper = await download();
+    expect(generate).toHaveBeenCalledOnce();
+    const zip = generate.mock.contexts[0] as JSZip;
+    const compose = await zip.file('docker-compose.yml')!.async('string');
+    expect(compose).toContain('http://localhost:5090/realms/aas-local');
+    expect(compose).not.toContain('http://localhost:5080');
+    const realm = JSON.parse(await zip.file('aas-suite/realm.json')!.async('string'));
+    expect(
+      realm.clients.find((client: { clientId: string }) => client.clientId === 'aas-designer-local')
+        .redirectUris
+    ).toEqual(['http://localhost:5090/*']);
+    wrapper.unmount();
+  });
 
   it('downloads local InfluxDB without requiring or bundling Telegraf configuration', async () => {
     const store = useAppStore();

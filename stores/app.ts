@@ -1,4 +1,5 @@
 // Utilities
+import type { ComposeService } from '@/utils/optionalServices';
 import * as yaml from 'js-yaml';
 import { defineStore } from 'pinia';
 import { replacePublishedPort } from '@/utils/composePorts';
@@ -18,6 +19,17 @@ import {
 } from '@/utils/externalUrls';
 import { mergeGeneratedConfig } from '@/utils/mergeGeneratedConfig';
 import { DEFAULT_POLICY, defaultTrustList } from '@/utils/securitySetup';
+import {
+  buildThirdPartyServiceCompose,
+  resolveThirdPartyServiceReferences,
+  thirdPartyManagedServiceIds,
+  type ThirdPartyService,
+} from '@/utils/thirdPartyServices';
+import {
+  compactThirdPartySnapshot,
+  expandThirdPartySnapshot,
+  type ThirdPartyServiceOverrides,
+} from '@/utils/thirdPartySnapshots';
 import { getHttpOrigin, parseTrustedOrigin } from '@/utils/trustedOrigins';
 
 interface ContainerPort {
@@ -105,6 +117,7 @@ export interface SerializableStarterState {
   thirdPartyServices?: ThirdPartyServiceSelection[];
   thirdPartyArchitecture?: 'amd64' | 'arm64';
   thirdPartyServiceDefaults?: Record<string, DockerComposeService>;
+  thirdPartyServiceOverrides?: ThirdPartyServiceOverrides;
 }
 
 function cloneSerializable<T>(value: T): T {
@@ -1287,6 +1300,33 @@ export const useAppStore = defineStore('app', {
       }
       this.syncManagedLocalInfluxDbOrigin();
     },
+    refreshThirdPartyServices(catalog: ThirdPartyService[]): string[] {
+      const config = this.dockerComposeConfig?.value;
+      if (!isRecord(config) || !isRecord(config.services)) return [];
+      const resolution = resolveThirdPartyServiceReferences(
+        catalog,
+        Object.fromEntries(
+          this.thirdPartyServices.map(selection => [selection.id, selection.values])
+        ),
+        config.services as Record<string, ComposeService>
+      );
+      if (resolution.errors.length) return resolution.errors;
+      const additions = Object.assign(
+        {},
+        ...this.thirdPartyServices.flatMap(selection => {
+          const service = catalog.find(service => service.id === selection.id);
+          return service
+            ? [buildThirdPartyServiceCompose(service, resolution.values[service.id] || {})]
+            : [];
+        })
+      );
+      this.setThirdPartyServices(
+        this.thirdPartyServices,
+        additions,
+        thirdPartyManagedServiceIds(catalog)
+      );
+      return [];
+    },
     setThirdPartyServices(
       selections: ThirdPartyServiceSelection[],
       additions: Record<string, DockerComposeService>,
@@ -1604,41 +1644,43 @@ export const useAppStore = defineStore('app', {
       }
     },
     createSerializableSnapshot(): SerializableStarterState {
-      return cloneSerializable({
-        registryIntegration: this.registryIntegration,
-        discoveryIntegration: this.discoveryIntegration,
-        externalBaseUrl: this.externalBaseUrl,
-        mqtt: this.mqtt,
-        timeSeriesData: this.timeSeriesData,
-        includeTelegraf: this.includeTelegraf,
-        includeLocalInfluxDb: this.includeLocalInfluxDb,
-        externalInfluxSettings: this.externalInfluxSettings,
-        userInterface: this.userInterface,
-        dashboard: this.dashboard,
-        aasDiscovery: this.aasDiscovery,
-        syncBranding: this.syncBranding,
-        customColor: this.customColor,
-        lightPrimaryColor: this.lightPrimaryColor,
-        darkPrimaryColor: this.darkPrimaryColor,
-        containerPorts: this.containerPorts,
-        containerNames: this.containerNames,
-        contextPathes: this.contextPathes,
-        basyxConfig: this.basyxConfig,
-        dockerComposeConfig: this.dockerComposeConfig,
-        basyxInfraConfig: this.basyxInfraConfig,
-        managedInfluxDbOrigin: this.managedInfluxDbOrigin,
-        localInfluxDbOriginOptOutKey: this.localInfluxDbOriginOptOutKey,
-        thirdPartyServices: this.thirdPartyServices,
-        thirdPartyServiceDefaults: this.thirdPartyServiceDefaults,
-        thirdPartyArchitecture: this.thirdPartyArchitecture,
-      });
+      return compactThirdPartySnapshot(
+        cloneSerializable({
+          registryIntegration: this.registryIntegration,
+          discoveryIntegration: this.discoveryIntegration,
+          externalBaseUrl: this.externalBaseUrl,
+          mqtt: this.mqtt,
+          timeSeriesData: this.timeSeriesData,
+          includeTelegraf: this.includeTelegraf,
+          includeLocalInfluxDb: this.includeLocalInfluxDb,
+          externalInfluxSettings: this.externalInfluxSettings,
+          userInterface: this.userInterface,
+          dashboard: this.dashboard,
+          aasDiscovery: this.aasDiscovery,
+          syncBranding: this.syncBranding,
+          customColor: this.customColor,
+          lightPrimaryColor: this.lightPrimaryColor,
+          darkPrimaryColor: this.darkPrimaryColor,
+          containerPorts: this.containerPorts,
+          containerNames: this.containerNames,
+          contextPathes: this.contextPathes,
+          basyxConfig: this.basyxConfig,
+          dockerComposeConfig: this.dockerComposeConfig,
+          basyxInfraConfig: this.basyxInfraConfig,
+          managedInfluxDbOrigin: this.managedInfluxDbOrigin,
+          localInfluxDbOriginOptOutKey: this.localInfluxDbOriginOptOutKey,
+          thirdPartyServices: this.thirdPartyServices,
+          thirdPartyServiceDefaults: this.thirdPartyServiceDefaults,
+          thirdPartyArchitecture: this.thirdPartyArchitecture,
+        })
+      );
     },
     applySerializableSnapshot(snapshot: unknown) {
       if (!snapshot || typeof snapshot !== 'object') {
         return;
       }
 
-      const data = snapshot as Record<string, unknown>;
+      const data = expandThirdPartySnapshot(snapshot as Record<string, unknown>);
 
       const booleanKeys = [
         'registryIntegration',
