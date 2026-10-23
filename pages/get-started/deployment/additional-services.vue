@@ -79,6 +79,11 @@
         </ul>
       </v-alert>
 
+      <v-alert v-if="unavailableSelections.length" type="warning" variant="tonal" class="mb-6">
+        Remove unavailable services or choose a supported CPU architecture before continuing. Your
+        service settings are preserved while switching architectures.
+      </v-alert>
+
       <h2 class="text-header mb-4">Available services</h2>
       <v-list class="bg-background border rounded-lg mb-8" lines="three">
         <v-list-item
@@ -97,14 +102,24 @@
               {{ tag }}
             </v-chip>
           </div>
+          <p v-if="architectureError(service)" class="text-body-2 text-warning mt-2 mb-0">
+            {{ architectureError(service) }}
+          </p>
           <template #append>
             <v-btn
+              :disabled="Boolean(architectureError(service)) && !isSelected(service.id)"
               :color="isSelected(service.id) ? 'secondary' : 'primary'"
               :prepend-icon="isSelected(service.id) ? 'mdi-minus' : 'mdi-plus'"
               :variant="isSelected(service.id) ? 'text' : 'tonal'"
               @click="isSelected(service.id) ? removeService(service.id) : addService(service)"
             >
-              {{ isSelected(service.id) ? 'Remove' : 'Add' }}
+              {{
+                isSelected(service.id)
+                  ? 'Remove'
+                  : architectureError(service)
+                    ? 'Unavailable'
+                    : 'Add'
+              }}
             </v-btn>
           </template>
         </v-list-item>
@@ -262,6 +277,7 @@ import {
   initializeThirdPartyValues,
   loadThirdPartyServiceCatalog,
   resolveThirdPartyServiceReferences,
+  thirdPartyArchitectureError,
   thirdPartyFieldError,
   thirdPartyManagedServiceIds,
   type ThirdPartyService,
@@ -295,11 +311,18 @@ const breadcrumbs = [
 
 const filteredServices = computed(() => {
   const query = search.value.trim().toLowerCase();
-  if (!query) return services.value;
-  return services.value.filter(service =>
-    [service.name, service.description, ...service.tags].join(' ').toLowerCase().includes(query)
-  );
+  return services.value
+    .filter(service =>
+      [service.name, service.description, ...service.tags].join(' ').toLowerCase().includes(query)
+    )
+    .sort((a, b) => Number(Boolean(architectureError(a))) - Number(Boolean(architectureError(b))));
 });
+
+function architectureError(service: ThirdPartyService): string | undefined {
+  return thirdPartyArchitectureError(service, architecture.value);
+}
+
+const unavailableSelections = computed(() => selectedServices().filter(architectureError));
 
 const configuredServices = computed(() =>
   selectedServices().filter(service => service.configuration.some(field => !field.generate))
@@ -314,6 +337,7 @@ const isConfigurationComplete = computed(
     selectedServices().every(service =>
       service.configuration.every(field => !fieldError(service.id, field))
     ) &&
+    unavailableSelections.value.length === 0 &&
     referenceResolution.value.errors.length === 0 &&
     portConflicts.value.length === 0
 );
@@ -383,6 +407,7 @@ function setArchitecture(value: unknown): void {
 }
 
 function addService(service: ThirdPartyService): void {
+  if (architectureError(service)) return;
   try {
     selected.value[service.id] = initializeThirdPartyValues(service, {}, architecture.value);
   } catch (error) {

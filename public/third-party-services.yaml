@@ -341,6 +341,9 @@ services:
 
   - id: david-sme-adapter
     name: DAVID SME Adapter
+    # Omit this map when the regular image or configured ARM64 tag supports both CPUs.
+    unsupportedArchitectures:
+      arm64: The davidadap/sme-adapter image has no ARM64 version.
     description: HKA's DAVID adapter for publishing SMEs as Asset Administration Shells in BaSyx.
     tags: [aas, sme, adapter, integration]
     compose:

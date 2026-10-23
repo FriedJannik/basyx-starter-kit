@@ -35,6 +35,8 @@ export interface ThirdPartyService {
   tags: string[];
   compose: Record<string, ComposeService>;
   legacyComposeIds?: string[];
+  /** Architectures with no supported image, mapped to a user-facing reason. */
+  unsupportedArchitectures?: Partial<Record<'amd64' | 'arm64', string>>;
   configuration: ThirdPartyServiceField[];
 }
 
@@ -168,6 +170,19 @@ export function parseThirdPartyServiceCatalog(source: string): ThirdPartyService
         return [composeId, cloneCompose(service) as ComposeService];
       })
     );
+    let unsupportedArchitectures: ThirdPartyService['unsupportedArchitectures'];
+    if (value.unsupportedArchitectures !== undefined) {
+      if (!isRecord(value.unsupportedArchitectures))
+        throw new Error(
+          `Unsupported architectures for ${id} must map CPU architectures to reasons.`
+        );
+      unsupportedArchitectures = {};
+      for (const [architecture, reason] of Object.entries(value.unsupportedArchitectures)) {
+        if (architecture !== 'amd64' && architecture !== 'arm64')
+          throw new Error(`Unsupported CPU architecture '${architecture}' for ${id}.`);
+        unsupportedArchitectures[architecture] = asString(reason, `Architecture reason for ${id}`);
+      }
+    }
     const configuration = Array.isArray(value.configuration)
       ? value.configuration.map(field => parseField(field, id))
       : [];
@@ -187,6 +202,7 @@ export function parseThirdPartyServiceCatalog(source: string): ThirdPartyService
       description: asString(value.description, `Service description for ${id}`),
       tags: Array.isArray(value.tags) ? value.tags.map(tag => asString(tag, `Tag for ${id}`)) : [],
       compose,
+      unsupportedArchitectures,
       legacyComposeIds: Array.isArray(value.legacyComposeIds)
         ? value.legacyComposeIds.map(legacyId => {
             const id = asString(legacyId, `Legacy Compose id for ${value.id}`);
@@ -342,11 +358,21 @@ export function thirdPartyValuesForArchitecture(
   return result;
 }
 
+export function thirdPartyArchitectureError(
+  service: ThirdPartyService,
+  architecture: ClientArchitecture
+): string | undefined {
+  const reason =
+    architecture === 'unknown' ? undefined : service.unsupportedArchitectures?.[architecture];
+  return reason ? `Unavailable on ${architecture.toUpperCase()} — ${reason}` : undefined;
+}
+
 /** Validate persisted inputs as well as the actual Compose output before export. */
 export function validateThirdPartyServices(
   services: ThirdPartyService[],
   selections: Array<{ id: string; values: Record<string, ThirdPartyValue> }>,
-  compose: Record<string, ComposeService>
+  compose: Record<string, ComposeService>,
+  architecture: ClientArchitecture = 'unknown'
 ): string[] {
   const errors = findComposePortConflicts(compose);
   const managed = new Set(thirdPartyManagedServiceIds(services));
@@ -370,6 +396,8 @@ export function validateThirdPartyServices(
       errors.push(`Unknown additional service '${selection.id}'.`);
       return;
     }
+    const architectureError = thirdPartyArchitectureError(service, architecture);
+    if (architectureError) errors.push(`${service.name}: ${architectureError}`);
     service.configuration.forEach(field => {
       const error = thirdPartyFieldError(field, resolution.values[service.id]?.[field.key]);
       if (error) errors.push(`${service.name}: ${field.label} — ${error}`);

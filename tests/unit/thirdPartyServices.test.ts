@@ -48,6 +48,11 @@ describe('third-party service catalogue', () => {
     expect(services.find(service => service.id === 'david-sme-adapter')?.compose).toHaveProperty(
       'david-sme-adapter'
     );
+    expect(
+      services.find(service => service.id === 'david-sme-adapter')?.unsupportedArchitectures
+    ).toEqual({
+      arm64: 'The davidadap/sme-adapter image has no ARM64 version.',
+    });
 
     const resolution = resolveThirdPartyServiceReferences(
       services,
