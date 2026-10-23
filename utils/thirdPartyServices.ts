@@ -2,6 +2,7 @@ import type { ClientArchitecture } from '@/utils/clientArchitecture';
 import type { ComposeService } from '@/utils/optionalServices';
 import * as yaml from 'js-yaml';
 import { findComposePortConflicts } from '@/utils/composePorts';
+import { isSensitiveKey } from '@/utils/configPersistence';
 
 export type ThirdPartyFieldType = 'text' | 'number' | 'password' | 'switch' | 'select';
 export type ThirdPartyValue = string | number | boolean | undefined;
@@ -388,7 +389,10 @@ const PLACEHOLDER_PATTERN = /{{\s*([^{}]+?)\s*}}/g;
 function readPort(service: ComposeService | undefined, indexFromEnd: number): string | undefined {
   const ports = service?.ports;
   if (!Array.isArray(ports) || typeof ports[0] !== 'string') return undefined;
-  return ports[0].split(':').at(indexFromEnd);
+  return ports[0]
+    .split(':')
+    .at(indexFromEnd)
+    ?.replace(/\/(tcp|udp|sctp)$/, '');
 }
 
 function readString(value: unknown): string | undefined {
@@ -475,6 +479,16 @@ export function resolveThirdPartyServiceReferences(
       const key = parts.slice(3).join('.');
       if (!key) {
         errors.add(`Invalid configuration reference '{{ ${reference} }}' in '${source}'.`);
+        return undefined;
+      }
+      const owner =
+        selectedById.get(targetId) ||
+        selectedServices.find(service => Object.hasOwn(service.compose, targetId));
+      const field = owner?.configuration.find(
+        field => field.key === key || field.environment === key
+      );
+      if (isSensitiveKey(key) || field?.type === 'password') {
+        errors.add(`Sensitive configuration reference '${targetId}.${key}' is not allowed.`);
         return undefined;
       }
       if (selectedById.has(targetId)) {

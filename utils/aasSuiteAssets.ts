@@ -3,15 +3,15 @@ import type JSZip from 'jszip';
 import frontendStart from '@/assets/aas-suite/frontend-start.sh?raw';
 import license from '@/assets/aas-suite/LICENSE?raw';
 import upstreamRealm from '@/assets/aas-suite/realm.json';
+import { readServiceEnvironment } from '@/utils/dockerEnvironment';
 
 /** Portable assets adapted from the official Community deployment. */
 export function addAasSuiteAssets(zip: JSZip, services: Record<string, ComposeService>): string {
   if (!services['aas-suite-gateway']) return '';
-  const gatewayEnvironment = services['aas-suite-gateway'].environment;
-  const publicIssuer =
-    gatewayEnvironment && !Array.isArray(gatewayEnvironment)
-      ? gatewayEnvironment.AppSettings__KeycloakPublicIssuer
-      : undefined;
+  const publicIssuer = readServiceEnvironment(
+    { services },
+    'aas-suite-gateway'
+  ).AppSettings__KeycloakPublicIssuer;
   if (!publicIssuer) throw new Error('AAS Suite public Keycloak issuer is missing.');
   const publicUrl = publicIssuer.replace(/\/realms\/aas-local\/?$/, '').replaceAll('$$', '$');
   const realm = JSON.parse(JSON.stringify(upstreamRealm)) as Record<string, unknown>;

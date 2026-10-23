@@ -94,6 +94,17 @@ const serviceLabelMap: Record<string, string> = {
   'aas-ui': 'AAS UI',
   influxdb: 'InfluxDB',
   telegraf: 'Telegraf',
+  keycloak: 'Keycloak',
+  mqtt: 'MQTT Broker',
+  kafka: 'Kafka',
+  'kafka-init': 'Kafka Initialization',
+  rabbitmq: 'RabbitMQ',
+  'otel-collector': 'OpenTelemetry Collector',
+  prometheus: 'Prometheus',
+  tempo: 'Tempo',
+  loki: 'Loki',
+  alloy: 'Alloy',
+  grafana: 'Grafana',
 };
 
 const serviceOrder = [
@@ -127,7 +138,11 @@ const servicesForConfig = computed(() => {
     }));
   const additionalServices = Object.keys(services)
     .filter(id => !serviceOrder.includes(id))
-    .map(id => ({ id, title: serviceLabelMap[id] || id, kind: 'third-party' as const }));
+    .map(id => ({
+      id,
+      title: serviceLabelMap[id] || id,
+      kind: Object.hasOwn(serviceLabelMap, id) ? ('core' as const) : ('third-party' as const),
+    }));
   return [...knownServices, ...additionalServices];
 });
 </script>

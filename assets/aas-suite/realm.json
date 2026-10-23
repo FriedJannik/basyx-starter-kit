@@ -148,28 +148,18 @@
       ]
     }
   ],
-  "users": [
-    {
-      "username": "local-provisioner",
-      "enabled": true,
-      "email": "local-provisioner@localhost",
-      "emailVerified": true,
-      "firstName": "Local",
-      "lastName": "Provisioner",
-      "requiredActions": [],
-      "credentials": [
-        {
-          "type": "password",
-          "value": "admin",
-          "temporary": false
-        }
-      ],
-      "clientRoles": {
-        "realm-management": ["realm-admin"]
-      }
-    }
-  ],
+  "users": [],
   "roles": {
-    "realm": [{ "name": "BENUTZER" }, { "name": "ORGA_ADMIN" }, { "name": "SYSTEM_ADMIN" }]
+    "realm": [
+      {
+        "name": "BENUTZER"
+      },
+      {
+        "name": "ORGA_ADMIN"
+      },
+      {
+        "name": "SYSTEM_ADMIN"
+      }
+    ]
   }
 }

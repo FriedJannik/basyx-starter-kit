@@ -150,10 +150,10 @@ services:
         image: redis:8.2.2-alpine
         ports: ["127.0.0.1:6379:6379"]
     configuration:
-      - key: password
-        label: Password
-        type: password
-        default: change-me
+      - key: database
+        label: Database
+        type: text
+        default: cache
   - id: worker
     name: Worker
     description: Worker
@@ -164,20 +164,20 @@ services:
       - key: cacheUrl
         label: Cache URL
         type: text
-        default: "redis://{{ services.redis.host }}:{{ services.redis.port }}/?password={{ services.redis.config.password }}"
+        default: "redis://{{ services.redis.host }}:{{ services.redis.port }}/{{ services.redis.config.database }}"
 `);
 
     const resolution = resolveThirdPartyServiceReferences(
       services,
       {
-        redis: { password: 'safe-value' },
+        redis: { database: 'cache' },
         worker: {},
       },
       { db: { image: 'postgres:16', ports: ['5432:5432'] } }
     );
 
     expect(resolution.errors).toEqual([]);
-    expect(resolution.values.worker?.cacheUrl).toBe('redis://redis:6379/?password=safe-value');
+    expect(resolution.values.worker?.cacheUrl).toBe('redis://redis:6379/cache');
   });
 
   it('reports missing services and circular configuration references', () => {

@@ -124,7 +124,7 @@
               <p class="text-caption text-medium-emphasis mb-4">
                 Text settings can reference selected services, for example
                 <code v-pre>{{ services.redis.host }}</code> or
-                <code v-pre>{{ services.redis.config.password }}</code
+                <code v-pre>{{ services.redis.config.database }}</code
                 >.
               </p>
               <v-row density="compact">
@@ -255,6 +255,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { type ThirdPartyServiceSelection, useAppStore } from '@/stores/app';
 import { type ClientArchitecture, detectClientArchitecture } from '@/utils/clientArchitecture';
 import { findComposePortConflicts } from '@/utils/composePorts';
+import { isSensitiveKey } from '@/utils/configPersistence';
 import {
   buildThirdPartyServiceCompose,
   defaultThirdPartyValues,
@@ -276,8 +277,6 @@ useSeoMeta({
 
 type FieldValues = Record<string, string | number | boolean | undefined>;
 type ReferenceOption = { title: string; value: string };
-
-const SENSITIVE_CONFIGURATION_KEY = /password|token|secret|salt|private.?key|connectionstrings?/i;
 
 const appStore = useAppStore();
 const services = ref<ThirdPartyService[]>([]);
@@ -476,10 +475,7 @@ function configurationReferenceOptions(
 
   return entries
     .filter(
-      ([key, value]) =>
-        typeof key === 'string' &&
-        typeof value === 'string' &&
-        !SENSITIVE_CONFIGURATION_KEY.test(key)
+      ([key, value]) => typeof key === 'string' && typeof value === 'string' && !isSensitiveKey(key)
     )
     .map(([key]) => ({
       title: `${serviceName}: ${key}`,

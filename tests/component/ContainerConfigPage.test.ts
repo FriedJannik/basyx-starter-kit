@@ -12,6 +12,19 @@ describe('Container config page', () => {
   });
 
   it('identifies core and third-party services in panel headers', () => {
+    const optionalCore = [
+      'keycloak',
+      'mqtt',
+      'kafka',
+      'kafka-init',
+      'rabbitmq',
+      'otel-collector',
+      'prometheus',
+      'tempo',
+      'loki',
+      'alloy',
+      'grafana',
+    ];
     const store = useAppStore();
     store.initializeStarterDefaults();
     store.setDockerComposeConfig({
@@ -20,6 +33,7 @@ describe('Container config page', () => {
         services: {
           'aas-environment': { image: 'eclipsebasyx/aasenvironment-go:2.0.0' },
           redis: { image: 'redis:8.2.2-alpine' },
+          ...Object.fromEntries(optionalCore.map(id => [id, { image: 'example/service:1' }])),
         },
       },
     });
@@ -34,7 +48,7 @@ describe('Container config page', () => {
           'v-col': { template: '<div><slot /></div>' },
           'v-icon': { template: '<i />' },
           ClientOnly: { template: '<div><slot /></div>' },
-          DockerConfig: { template: '<div />' },
+          DockerConfig: { props: ['serviceName'], template: '<div :data-service="serviceName" />' },
           'v-expansion-panels': { template: '<div><slot /></div>' },
           'v-expansion-panel': { template: '<section><slot /></section>' },
           'v-expansion-panel-title': { template: '<div><slot /></div>' },
@@ -49,5 +63,13 @@ describe('Container config page', () => {
 
     expect(wrapper.text()).toContain('Core service');
     expect(wrapper.text()).toContain('3rd party');
+    optionalCore.forEach(id => {
+      expect(
+        wrapper.find(`[data-service="${id}"]`).element.closest('section')!.textContent
+      ).toContain('Core service');
+    });
+    expect(
+      wrapper.find('[data-service="redis"]').element.closest('section')!.textContent
+    ).toContain('3rd party');
   });
 });
